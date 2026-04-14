@@ -1,0 +1,88 @@
+name: Build Electron Linux ARM64 AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "dev", "main" ]
+    paths:
+      - ".github/workflows/build-electron-linux-arm64-appimage.yml"
+      - "packages/desktop-electron/**"
+      - "packages/app/**"
+      - "packages/ui/**"
+      - "packages/opencode/**"
+      - "package.json"
+      - "bun.lock"
+      - "turbo.json"
+
+jobs:
+  build-linux-arm64-appimage:
+    # 关键：必须是真 ARM64 runner
+    # 你可以用 GitHub 官方 ARM64 runner，或自建 self-hosted ARM64 runner
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install Linux packaging deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            rpm \
+            libfuse2 \
+            libgtk-3-0 \
+            libnss3 \
+            libxss1 \
+            libasound2t64 \
+            libdrm2 \
+            libgbm1 \
+            patchelf
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # 可选，但建议保留：先确认 ARM64 的 node-pty 可解析
+      - name: Show optional dependency
+        run: |
+          node -p "process.arch"
+          node -p "process.platform"
+
+      # 如果你只是想本地打包，不需要官方 release 版本号逻辑
+      - name: Build desktop-electron
+        working-directory: packages/desktop-electron
+        env:
+          OPENCODE_CHANNEL: dev
+        run: |
+          bun run build
+
+      - name: Package ARM64 AppImage only
+        working-directory: packages/desktop-electron
+        env:
+          OPENCODE_CHANNEL: dev
+          USE_SYSTEM_FPM: "true"
+        run: |
+          npx electron-builder --linux AppImage --arm64 --publish never --config electron-builder.config.ts
+
+      - name: Verify artifact architecture
+        working-directory: packages/desktop-electron/dist
+        run: |
+          ls -lah
+          APPIMAGE="$(find . -maxdepth 1 -name '*.AppImage' | head -n 1)"
+          echo "APPIMAGE=$APPIMAGE"
+          test -n "$APPIMAGE"
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-electron-linux-arm64-appimage
+          path: packages/desktop-electron/dist/*.AppImage
